@@ -455,6 +455,7 @@ def process_geojson(geojson_file):
         time.sleep(1)
 
 # ========== MAIN LOOP ==========
+# ========== MAIN LOOP ==========
 def run():
     main_folder = select_main_folder()
     if not main_folder:
@@ -463,7 +464,6 @@ def run():
 
     print(f"Selected folder: {main_folder}")
     build_job_list(main_folder)
-
     while not check_all_done(main_folder):
         geojson_file = claim_next_job(main_folder)
         if geojson_file is None:
@@ -476,3 +476,6 @@ def run():
 
     print("All GeoJSON files processed.")
 
+
+if __name__ in {"__main__", "__console__"}:
+    run()
