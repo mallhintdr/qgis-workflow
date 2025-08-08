@@ -363,98 +363,97 @@ def process_geojson(geojson_file):
         mem_layer.updateExtents()
         print("Memory layer created.")
 
-            # Add to project ONLY because some QGIS versions need project layers for native:tilesxyzdirectory
-            QgsProject.instance().addMapLayer(mem_layer)
-            try:
-                tile_style_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tile_style.qml")
-                if os.path.exists(tile_style_path):
-                    mem_layer.loadNamedStyle(tile_style_path)
-            except Exception:
-                pass
-            mem_layer.setLabelsEnabled(True)  # labels required
+        # Add to project ONLY because some QGIS versions need project layers for native:tilesxyzdirectory
+        QgsProject.instance().addMapLayer(mem_layer)
+        try:
+            tile_style_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tile_style.qml")
+            if os.path.exists(tile_style_path):
+                mem_layer.loadNamedStyle(tile_style_path)
+        except Exception:
+            pass
+        mem_layer.setLabelsEnabled(True)   # labels required
 
-            # Dissolve -> multipart to single -> exterior rings -> label
-            if mem_layer.fields().indexFromName("group_key") == -1:
-                print("group_key field missing; skipping dissolve.")
-                return
+        # Dissolve -> multipart to single -> exterior rings -> label
+        if mem_layer.fields().indexFromName("group_key") == -1:
+            print("group_key field missing; skipping dissolve.")
+            return
 
-            dissolved = processing.run(
-                "native:dissolve",
-                {"INPUT": mem_layer, "FIELD": ["group_key"], "OUTPUT": "memory:"},
-                feedback=MinimalFeedback()
-            )["OUTPUT"]
+        dissolved = processing.run(
+            "native:dissolve",
+            {"INPUT": mem_layer, "FIELD": ["group_key"], "OUTPUT": "memory:"},
+            feedback=MinimalFeedback()
+        )["OUTPUT"]
 
-            outline_layer = processing.run(
-                "native:multiparttosingleparts",
-                {"INPUT": dissolved, "OUTPUT": "memory:"},
-                feedback=MinimalFeedback()
-            )["OUTPUT"]
+        outline_layer = processing.run(
+            "native:multiparttosingleparts",
+            {"INPUT": dissolved, "OUTPUT": "memory:"},
+            feedback=MinimalFeedback()
+        )["OUTPUT"]
 
-            clean_msg = clean_outline_layer_batch(outline_layer)
-            print(f"Outline cleaned. {clean_msg}")
-            QgsProject.instance().addMapLayer(outline_layer)
-            try:
-                murabb_style_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "murabb_style.qml")
-                if os.path.exists(murabb_style_path):
-                    outline_layer.loadNamedStyle(murabb_style_path)
-            except Exception:
-                pass
-            outline_layer.setLabelsEnabled(True)  # labels required
+        clean_msg = clean_outline_layer_batch(outline_layer)
+        print(f"Outline cleaned. {clean_msg}")
+        QgsProject.instance().addMapLayer(outline_layer)
+        try:
+            murabb_style_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "murabb_style.qml")
+            if os.path.exists(murabb_style_path):
+                outline_layer.loadNamedStyle(murabb_style_path)
+        except Exception:
+            pass
+        outline_layer.setLabelsEnabled(True)  # labels required
 
-            # Extent in WGS84 for math + export
-            xmin, xmax, ymin, ymax = layer_extent_wgs84(outline_layer)
-            tiles_est = compute_total_tiles_wgs84(xmin, xmax, ymin, ymax, ZOOM_MIN, ZOOM_MAX)
-            print(f"Tiles to generate: {tiles_est}")
+        # Extent in WGS84 for math + export
+        xmin, xmax, ymin, ymax = layer_extent_wgs84(outline_layer)
+        tiles_est = compute_total_tiles_wgs84(xmin, xmax, ymin, ymax, ZOOM_MIN, ZOOM_MAX)
+        print(f"Tiles to generate: {tiles_est}")
 
-            output_dir = os.path.join(os.path.dirname(geojson_file), base_name)
-            os.makedirs(output_dir, exist_ok=True)
+        output_dir = os.path.join(os.path.dirname(geojson_file), base_name)
+        os.makedirs(output_dir, exist_ok=True)
 
-            # Prefer qgis:tilesxyzdirectory (supports LAYERS). If not found, fall back to native (project layers).
-            alg_id = "qgis:tilesxyzdirectory"
-            have_qgis_alg = False
-            try:
-                processing.algorithmHelp(alg_id)
-                have_qgis_alg = True
-            except Exception:
-                alg_id = "native:tilesxyzdirectory"
+        # Prefer qgis:tilesxyzdirectory (supports LAYERS). If not found, fall back to native (project layers).
+        alg_id = "qgis:tilesxyzdirectory"
+        have_qgis_alg = False
+        try:
+            processing.algorithmHelp(alg_id)
+            have_qgis_alg = True
+        except Exception:
+            alg_id = "native:tilesxyzdirectory"
 
-            params = {
-                "EXTENT": f"{xmin},{xmax},{ymin},{ymax} [EPSG:4326]",
-                "ZOOM_MIN": ZOOM_MIN,
-                "ZOOM_MAX": ZOOM_MAX,
-                "TILE_WIDTH": TILE_WIDTH,
-                "TILE_HEIGHT": TILE_HEIGHT,
-                "DPI": DPI,
-                "BACKGROUND_COLOR": BACKGROUND_COLOR,
-                "ANTIALIAS": ANTIALIAS,
-                "TILE_FORMAT": TILE_FORMAT,
-                "QUALITY": 90,
-                "METATILESIZE": METATILESIZE,
-                "TMS_CONVENTION": False,
-                "OUTPUT_DIRECTORY": output_dir.replace("\\", "/"),
-            }
-            if have_qgis_alg:
-                params["LAYERS"] = [mem_layer, outline_layer]
+        params = {
+            "EXTENT": f"{xmin},{xmax},{ymin},{ymax} [EPSG:4326]",
+            "ZOOM_MIN": ZOOM_MIN,
+            "ZOOM_MAX": ZOOM_MAX,
+            "TILE_WIDTH": TILE_WIDTH,
+            "TILE_HEIGHT": TILE_HEIGHT,
+            "DPI": DPI,
+            "BACKGROUND_COLOR": BACKGROUND_COLOR,
+            "ANTIALIAS": ANTIALIAS,
+            "TILE_FORMAT": TILE_FORMAT,
+            "QUALITY": 90,
+            "METATILESIZE": METATILESIZE,
+            "TMS_CONVENTION": False,
+            "OUTPUT_DIRECTORY": output_dir.replace("\\", "/"),
+        }
 
-            try:
-                processing.run(alg_id, params, feedback=MinimalFeedback())
-                print(f"Tiles generated for '{base_name}'.")
-                clean_tiles(output_dir, prefix=f"{base_name}: ")
-            except Exception as e:
-                print(f"Error generating tiles for {base_name}: {e}")
+        # Only qgis:* supports explicit LAYERS parameter
+        if have_qgis_alg:
+            params["LAYERS"] = [mem_layer, outline_layer]
 
-        except Exception as e:
-            print(f"Error processing {geojson_file}: {e}")
-        finally:
-            # Clean the project to avoid GUI churn between jobs
-            try:
-                for l in list(QgsProject.instance().mapLayers().values()):
-                    QgsProject.instance().removeMapLayer(l.id())
-            except Exception:
-                pass
-            gc.collect()
-            time.sleep(1)
+        processing.run(alg_id, params, feedback=MinimalFeedback())
+        print(f"Tiles generated for '{base_name}'.")
 
+        clean_tiles(output_dir, prefix=f"{base_name}: ")
+
+    except Exception:
+        print(f"Error processing {geojson_file}")
+    finally:
+        # Clean the project to avoid GUI churn between jobs
+        try:
+            for l in list(QgsProject.instance().mapLayers().values()):
+                QgsProject.instance().removeMapLayer(l.id())
+        except Exception:
+            pass
+        gc.collect()
+        time.sleep(1)
 
 # ========== MAIN LOOP ==========
 def run():
@@ -465,6 +464,7 @@ def run():
 
     print(f"Selected folder: {main_folder}")
     build_job_list(main_folder)
+
     while not check_all_done(main_folder):
         geojson_file = claim_next_job(main_folder)
         if geojson_file is None:
@@ -480,4 +480,3 @@ def run():
 
 if __name__ in {"__main__", "__console__"}:
     run()
-
